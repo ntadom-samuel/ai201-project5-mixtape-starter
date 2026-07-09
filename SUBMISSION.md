@@ -64,3 +64,19 @@ _(Each entry covers: Symptom, Root Cause, Fix, Verification, Prevention.)_
   not to incidental properties like weekday. The regression test for the Sunday
   boundary now guards against reintroducing a day-of-week special case.
 
+### Bug 5 — Last song in a playlist never shows up (`playlist_service.py`)
+
+- **Symptom:** Viewing a playlist's songs always omits the final track. A
+  playlist with 5 songs returns only 4; a 1-song playlist returns none.
+- **Root cause:** `get_playlist_songs` queried and ordered the songs correctly
+  but returned a truncated slice: `[song.to_dict() for song in songs[:-1]]`.
+  The `[:-1]` slice drops the last element of the list, so the last song by
+  position is silently discarded.
+- **Fix:** Iterate the full result set: `[song.to_dict() for song in songs]`.
+- **Verification:** `pytest tests/test_playlists.py` — `test_playlist_returns_all_songs`
+  (expects 5) and `test_playlist_returns_songs_in_order` now pass, and the
+  empty-playlist test still passes (an empty list slices safely).
+- **Prevention:** Off-by-one/slice truncations are easy to miss; the count- and
+  order-based tests now assert the complete set is returned. When a function's
+  docstring says "returns all", the return statement should not slice.
+
