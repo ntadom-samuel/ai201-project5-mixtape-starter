@@ -45,3 +45,22 @@ filters by playlist, orders by `position`, and returns the serialized list.
 ## Root Cause Analyses
 
 _(Each entry covers: Symptom, Root Cause, Fix, Verification, Prevention.)_
+
+### Bug 1 — Listening streak keeps resetting (`streak_service.py`)
+
+- **Symptom:** A user with an active streak who listens on consecutive days
+  sees their streak drop back to 1 whenever the second day is a Sunday.
+- **Root cause:** In `update_listening_streak`, the "consecutive day" branch was
+  gated by an extraneous condition: `elif days_since_last == 1 and today.weekday() != 6`.
+  `weekday() == 6` is Sunday, so a legitimate consecutive-day listen that landed
+  on a Sunday failed the condition and fell through to the `else` branch, which
+  resets `listening_streak = 1`. The day-of-week has no bearing on whether two
+  calendar days are consecutive.
+- **Fix:** Removed the `and today.weekday() != 6` clause so any listen exactly
+  one calendar day after the previous one extends the streak, Sundays included.
+- **Verification:** `pytest tests/test_streaks.py` — the previously failing
+  `test_streak_increments_on_sunday` now passes, and all 5 streak tests pass.
+- **Prevention:** Keep boundary logic tied to the actual invariant (day delta),
+  not to incidental properties like weekday. The regression test for the Sunday
+  boundary now guards against reintroducing a day-of-week special case.
+
