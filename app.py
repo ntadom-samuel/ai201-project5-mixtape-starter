@@ -4,7 +4,7 @@ app.py — Mixtape
 Flask application factory and database setup.
 """
 
-from flask import Flask
+from flask import Flask, jsonify
 from flask_sqlalchemy import SQLAlchemy
 import os
 
@@ -36,6 +36,18 @@ def create_app(config=None):
     app.register_blueprint(playlists_bp, url_prefix="/playlists")
     app.register_blueprint(users_bp, url_prefix="/users")
     app.register_blueprint(feed_bp, url_prefix="/feed")
+
+    @app.route("/")
+    def index():
+        """Root endpoint: list the available API routes."""
+        routes = []
+        for rule in app.url_map.iter_rules():
+            if rule.endpoint == "static" or rule.rule == "/":
+                continue
+            methods = sorted(m for m in rule.methods if m not in ("HEAD", "OPTIONS"))
+            routes.append({"path": rule.rule, "methods": methods})
+        routes.sort(key=lambda r: r["path"])
+        return jsonify({"service": "Mixtape", "endpoints": routes})
 
     with app.app_context():
         db.create_all()
