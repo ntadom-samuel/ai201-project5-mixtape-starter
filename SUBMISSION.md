@@ -44,12 +44,27 @@ filters by playlist, orders by `position`, and returns the serialized list.
 
 ## Root Cause Analyses
 
-_(Each entry covers: Symptom, Root Cause, Fix, Verification, Prevention.)_
+_(Each entry covers: Symptom, How I reproduced it, Root Cause, Fix, Verification, Prevention.)_
+
+**Reproduction methodology (Milestone 2):** Every bug below was reproduced
+against the original buggy code *before* any fix. To do this faithfully after the
+fixes were committed, I checked out the pre-fix `main` branch into an isolated
+`git worktree` and triggered each bug there — via the failing pre-fix tests (Bugs
+1 and 5) and via a scripted run through the Flask HTTP layer (Bug 4). The
+observed misbehavior is recorded in each entry's "How I reproduced it" field.
 
 ### Bug 1 — Listening streak keeps resetting (`streak_service.py`)
 
 - **Symptom:** A user with an active streak who listens on consecutive days
   sees their streak drop back to 1 whenever the second day is a Sunday.
+- **How I reproduced it:** Ran the pre-fix code (the `main` branch, in an isolated
+  git worktree) and called `update_listening_streak(user, saturday)` followed by
+  `update_listening_streak(user, sunday)` for the consecutive dates 2024-06-15
+  (Sat, `weekday()==5`) and 2024-06-16 (Sun, `weekday()==6`). The streak came back
+  as **1** instead of the expected **2**. This is exactly the state
+  `tests/test_streaks.py::test_streak_increments_on_sunday` sets up, which failed
+  on `main` with `assert 1 == 2`. The required data condition is a prior listen on
+  Saturday plus a follow-up listen whose calendar day is a Sunday.
 - **Root cause:** In `update_listening_streak`, the "consecutive day" branch was
   gated by an extraneous condition: `elif days_since_last == 1 and today.weekday() != 6`.
   `weekday() == 6` is Sunday, so a legitimate consecutive-day listen that landed
@@ -68,6 +83,13 @@ _(Each entry covers: Symptom, Root Cause, Fix, Verification, Prevention.)_
 
 - **Symptom:** Viewing a playlist's songs always omits the final track. A
   playlist with 5 songs returns only 4; a 1-song playlist returns none.
+- **How I reproduced it:** Against the pre-fix code, seeded a playlist with 5
+  songs at positions 1–5 and called `get_playlist_songs(playlist_id)`. It returned
+  only **4** songs — `["Track 1", "Track 2", "Track 3", "Track 4"]`, dropping
+  "Track 5". This matches `tests/test_playlists.py::test_playlist_returns_all_songs`
+  and `test_playlist_returns_songs_in_order`, both of which failed on `main`
+  (`assert 4 == 5` / "Right contains one more item: 'Track 5'"). The trigger is
+  simply any non-empty playlist; the last item by position is always lost.
 - **Root cause:** `get_playlist_songs` queried and ordered the songs correctly
   but returned a truncated slice: `[song.to_dict() for song in songs[:-1]]`.
   The `[:-1]` slice drops the last element of the list, so the last song by
@@ -84,6 +106,14 @@ _(Each entry covers: Symptom, Root Cause, Fix, Verification, Prevention.)_
 
 - **Symptom:** A user is notified when a friend adds one of their shared songs
   to a playlist, but receives nothing when a friend rates that song.
+- **How I reproduced it:** Against the pre-fix code, drove the real HTTP layer
+  with Flask's test client. Set up a sharer (`nova`) who shared a song and a
+  friend (`darius`). Checked the sharer's notifications (count `0`), then had the
+  friend rate the song via `POST /songs/<song_id>/rate` with
+  `{"user_id": <friend>, "score": 4}` — which returned `201`, so the rating saved
+  — and re-checked `GET /users/<sharer>/notifications`: still **0**. The friend's
+  rating produced no notification for the sharer, confirming the report. The
+  trigger is any rating by a user other than the song's sharer.
 - **Root cause:** `add_to_playlist` ends by calling `create_notification(...)`
   for the song's original sharer, but the parallel `rate_song` function never
   created a notification at all — it saved/updated the `Rating` and returned.
