@@ -80,3 +80,24 @@ _(Each entry covers: Symptom, Root Cause, Fix, Verification, Prevention.)_
   order-based tests now assert the complete set is returned. When a function's
   docstring says "returns all", the return statement should not slice.
 
+### Bug 4 — No notification when a friend rates your song (`notification_service.py`)
+
+- **Symptom:** A user is notified when a friend adds one of their shared songs
+  to a playlist, but receives nothing when a friend rates that song.
+- **Root cause:** `add_to_playlist` ends by calling `create_notification(...)`
+  for the song's original sharer, but the parallel `rate_song` function never
+  created a notification at all — it saved/updated the `Rating` and returned.
+  The notification side effect was simply missing from the rating path.
+- **Fix:** After committing the rating in `rate_song`, create a `song_rated`
+  notification addressed to `song.shared_by`, guarded by `song.shared_by != user_id`
+  so users are not notified about rating their own shared songs — mirroring the
+  existing pattern in `add_to_playlist`.
+- **Verification:** No test existed, so I exercised it directly: a friend rating
+  a shared song produces exactly one `song_rated` notification with the expected
+  body (`"rater rated your song 'Anthem' 4/5."`), and a self-rating produces
+  none. (Manual script; output confirmed.)
+- **Prevention:** The two interaction paths (add-to-playlist, rate) should share
+  the same "notify the sharer" contract; keeping them symmetric — and ideally
+  adding a regression test asserting a notification per foreign interaction —
+  prevents one path from silently losing the side effect.
+
