@@ -1,5 +1,60 @@
 # Project 5: Mixtape Bug Hunt — Submission
 
+## AI Usage
+
+I worked through this project with Claude Code (Anthropic's CLI). Being specific
+about what that collaboration actually looked like:
+
+**What I asked the AI to do**
+
+- **Orient me in the codebase.** I had it read every file and produce the
+  "Codebase Map" below — the file/role table and the route → service → model
+  data-flow trace for the rating and playlist features. I then read the files
+  myself to confirm the map matched the real call chains (e.g. that
+  `routes/songs.py::rate` really does call `notification_service.rate_song`).
+- **Explain the suspected root cause of each issue** and point me at the exact
+  lines. This was genuinely fast for the mechanical bugs: the `[:-1]` slice in
+  `get_playlist_songs`, the `and today.weekday() != 6` clause in the streak
+  logic, and the missing `create_notification` call in `rate_song`.
+- **Set up honest reproduction.** For Milestone 2 I had it check the pre-fix
+  `main` branch out into a separate `git worktree` so I could trigger each bug on
+  the *original* code rather than trusting that the fix "must have" addressed the
+  reported behavior.
+
+**Where I had to verify, and where the AI was incomplete or wrong**
+
+- **Search Issue #3 was the clearest miss.** The AI initially agreed with the
+  tracker that a song with multiple tags would appear duplicated in search
+  results, because `search_songs` does an `outerjoin` on `song_tags` with no
+  `DISTINCT`. That reasoning is correct for raw SQL rows — but when I actually
+  ran `tests/test_search.py`, the "no duplicates" test **passed**. Running it is
+  what caught it: SQLAlchemy's ORM de-duplicates full-entity results by identity,
+  so the join fan-out never reaches the caller. I decided *not* to claim Issue #3
+  as fixed, since I couldn't reproduce the symptom on this stack — reproduction
+  discipline overruled the plausible-sounding explanation.
+- **Feed Issue #2 was left alone on purpose.** The AI could describe the 24-hour
+  `RECENT_THRESHOLD` as "probably too wide for 'listening now'," but neither of us
+  could know the *intended* window without the project brief, so guessing a value
+  would have been a fabricated fix. I chose the three bugs I could actually
+  demonstrate instead.
+- **The reproduction script for Issue #4 failed on the first try** for an
+  unrelated reason: driving the add-to-playlist endpoint raised
+  `NOT NULL constraint failed: playlist_entries.position` (the relationship append
+  doesn't populate the association-table's `position`/`added_by` columns). That
+  wasn't one of my bugs, so I narrowed the reproduction to the rating path only —
+  but it surfaced a real separate latent bug I would not have noticed otherwise.
+- **I verified every fix by execution, not by description.** Bugs #1 and #5 are
+  confirmed by the previously-failing pytest tests now passing (13/13 green); bug
+  #4 had no test, so I exercised it end-to-end through the Flask test client and
+  confirmed both that the sharer now receives exactly one `song_rated`
+  notification and that self-rating produces none.
+
+**Net:** the AI was most useful for fast orientation, line-level root-cause
+pointers, and scaffolding reproductions/tests. It was least reliable when a
+plausible explanation depended on runtime/library behavior (the SQLAlchemy
+de-duplication) or on missing external context (the feed threshold) — in both
+cases running the code, not reading the explanation, is what settled it.
+
 ## Codebase Map
 
 Mixtape is a Flask + SQLAlchemy social music app. It follows a three-layer
